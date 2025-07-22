@@ -1,17 +1,7 @@
-const SCRIPT_VERSION = 'v20250617';
-// == 样式注入模块 ==
-// 注入自定义CSS隐藏特定元素
-function injectCustomCSS() {
-  const style = document.createElement('style');
-  style.textContent = `
-    /* 隐藏父级类名为 mt-4 w-full mx-auto 下的所有 div */
-    .mt-4.w-full.mx-auto > div {
-      display: none;
-    }
-  `;
-  document.head.appendChild(style);
-}
-injectCustomCSS();
+const SCRIPT_VERSION = 'v20250722';
+
+// == 样式注入模块 - 已移除 ==
+// 不再使用全局CSS注入，改为在渲染时动态隐藏原始元素
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -119,6 +109,18 @@ const utils = (() => {
 
 // == 流量统计渲染模块 ==
 const trafficRenderer = (() => {
+  /**
+   * 隐藏原始流量显示元素（保留进度条）
+   */
+  function hideOriginalElements() {
+    document.querySelectorAll('.mt-4.w-full.mx-auto > div').forEach(el => {
+      // 只隐藏非脚本添加的元素
+      if (!el.classList.contains('new-inserted-element')) {
+        el.style.display = 'none';
+      }
+    });
+  }
+
   /**
    * 渲染流量统计条目
    * @param {Object} trafficData - 后台返回的流量数据
@@ -246,6 +248,9 @@ const trafficRenderer = (() => {
         log(`插入新流量条目: ${serverName}`);
       }
     });
+
+    // 确保所有相关元素都被处理
+    hideOriginalElements();
   }
 
   return {
