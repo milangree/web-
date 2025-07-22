@@ -1,17 +1,4 @@
-const SCRIPT_VERSION = 'v20250617';
-// == 样式注入模块 ==
-// 注入自定义CSS隐藏特定元素
-function injectCustomCSS() {
-  const style = document.createElement('style');
-  style.textContent = `
-    /* 隐藏父级类名为 mt-4 w-full mx-auto 下的所有 div */
-    .mt-4.w-full.mx-auto > div {
-      display: none;
-    }
-  `;
-  document.head.appendChild(style);
-}
-injectCustomCSS();
+const SCRIPT_VERSION = 'v20250701';
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -108,35 +95,28 @@ const utils = (() => {
     return `hsl(${h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%)`;
   }
 
-  /**
-   * 透明度渐隐渐现切换内容
-   * @param {HTMLElement} element - 目标元素
-   * @param {string} newContent - 新HTML内容
-   * @param {number} duration - 动画持续时间，毫秒
-   */
-  function fadeOutIn(element, newContent, duration = 500) {
-    element.style.transition = `opacity ${duration / 2}ms`;
-    element.style.opacity = '0';
-    setTimeout(() => {
-      element.innerHTML = newContent;
-      element.style.transition = `opacity ${duration / 2}ms`;
-      element.style.opacity = '1';
-    }, duration / 2);
-  }
-
   return {
     formatFileSize,
     calculatePercentage,
     formatDate,
     safeSetTextContent,
-    getHslGradientColor,
-    fadeOutIn
+    getHslGradientColor
   };
 })();
 
 // == 流量统计渲染模块 ==
 const trafficRenderer = (() => {
-  const toggleElements = [];  // 存储需周期切换显示的元素及其内容
+  /**
+   * 隐藏原始流量显示元素（保留进度条）
+   */
+  function hideOriginalElements() {
+    document.querySelectorAll('.mt-4.w-full.mx-auto > div').forEach(el => {
+      // 只隐藏非脚本添加的元素
+      if (!el.classList.contains('new-inserted-element')) {
+        el.style.display = 'none';
+      }
+    });
+  }
 
   /**
    * 渲染流量统计条目
@@ -156,7 +136,6 @@ const trafficRenderer = (() => {
         const max = cycle.max;
         const from = cycle.from;
         const to = cycle.to;
-        const next_update = cycle.next_update[serverId];
         if (serverName && transfer !== undefined && max && from && to) {
           serverMap.set(serverName, {
             id: serverId,
@@ -164,8 +143,7 @@ const trafficRenderer = (() => {
             max,
             name: cycle.name,
             from,
-            to,
-            next_update
+            to
           });
         }
       }
@@ -186,7 +164,6 @@ const trafficRenderer = (() => {
       const percentage = utils.calculatePercentage(serverData.transfer, serverData.max);
       const fromFormatted = utils.formatDate(serverData.from);
       const toFormatted = utils.formatDate(serverData.to);
-      const nextUpdateFormatted = new Date(serverData.next_update).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
       const uniqueClassName = 'traffic-stats-for-server-' + serverData.id;
       const progressColor = utils.getHslGradientColor(percentage);
       const containerDiv = targetElement.closest('div');
@@ -216,8 +193,13 @@ const trafficRenderer = (() => {
         utils.safeSetTextContent(existing, '.total-unit', totalFormatted.unit);
         utils.safeSetTextContent(existing, '.from-date', fromFormatted);
         utils.safeSetTextContent(existing, '.to-date', toFormatted);
-        utils.safeSetTextContent(existing, '.percentage-value', percentage + '%');
-        utils.safeSetTextContent(existing, '.next-update', `next update: ${nextUpdateFormatted}`);
+        
+        // 更新百分比元素
+        const percentageEl = existing.querySelector('.percentage-value');
+        if (percentageEl) {
+          percentageEl.textContent = percentage + '%';
+          percentageEl.style.fontSize = '10px';
+        }
 
         const progressBar = existing.querySelector('.progress-bar');
         if (progressBar) {
@@ -236,21 +218,18 @@ const trafficRenderer = (() => {
         }
         if (!oldSection) return;
 
-        // 时间区间内容，用于切换显示
-        const defaultTimeInfoHTML = `<span class="from-date">${fromFormatted}</span>
-                <span class="text-neutral-500 dark:text-neutral-400">-</span>
-                <span class="to-date">${toFormatted}</span>`;
-        const contents = [
-          defaultTimeInfoHTML,
-          `<span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 percentage-value">${percentage}%</span>`,
-          `<span class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300">${nextUpdateFormatted}</span>`
-        ];
-
         const newElement = document.createElement('div');
         newElement.classList.add('space-y-1.5', 'new-inserted-element', uniqueClassName);
         newElement.style.width = '100%';
         newElement.innerHTML = `
           <div class="flex items-center justify-between">
+            <!-- 时间信息 -->
+            <div class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300 time-info">
+              <span class="from-date">${fromFormatted}</span>
+              <span class="text-neutral-500 dark:text-neutral-400">-</span>
+              <span class="to-date">${toFormatted}</span>
+            </div>
+            <!-- 流量信息 -->
             <div class="flex items-baseline gap-1">
               <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-traffic">${usedFormatted.value}</span>
               <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-unit">${usedFormatted.unit}</span>
@@ -258,55 +237,30 @@ const trafficRenderer = (() => {
               <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-traffic">${totalFormatted.value}</span>
               <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-unit">${totalFormatted.unit}</span>
             </div>
-            <div class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300 time-info" style="opacity:1; transition: opacity 0.3s;">
-              ${defaultTimeInfoHTML}
-            </div>
           </div>
-          <div class="relative h-1.5">
-            <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full"></div>
-            <div class="absolute inset-0 bg-emerald-500 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
+          <div class="flex items-center gap-1">
+            <div class="relative h-1.5 flex-grow">
+              <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full"></div>
+              <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
+            </div>
+            <!-- 百分比显示在进度条后面 -->
+            <div class="font-medium text-neutral-800 dark:text-neutral-200 percentage-value" style="min-width: 40px; text-align: right; font-size: 10px;">
+              ${percentage}%
+            </div>
           </div>
         `;
 
         oldSection.after(newElement);
         log(`插入新流量条目: ${serverName}`);
-
-        // 启用切换时，将元素及其内容保存以便周期切换
-        if (config.toggleInterval > 0) {
-          const timeInfoElement = newElement.querySelector('.time-info');
-          if (timeInfoElement) {
-            toggleElements.push({
-              el: timeInfoElement,
-              contents
-            });
-          }
-        }
       }
     });
-  }
 
-  /**
-   * 启动周期切换内容显示（用于时间、百分比等轮播）
-   * @param {number} toggleInterval - 切换间隔，毫秒
-   * @param {number} duration - 动画时长，毫秒
-   */
-  function startToggleCycle(toggleInterval, duration) {
-    if (toggleInterval <= 0) return;
-    let toggleIndex = 0;
-
-    setInterval(() => {
-      toggleIndex++;
-      toggleElements.forEach(({ el, contents }) => {
-        if (!document.body.contains(el)) return;
-        const index = toggleIndex % contents.length;
-        utils.fadeOutIn(el, contents[index], duration);
-      });
-    }, toggleInterval);
+    // 确保所有相关元素都被处理
+    hideOriginalElements();
   }
 
   return {
-    renderTrafficStats,
-    startToggleCycle
+    renderTrafficStats
   };
 })();
 
@@ -430,14 +384,12 @@ const domObserver = (() => {
   const defaultConfig = {
     showTrafficStats: true,
     insertAfter: true,
-    interval: 60000,
-    toggleInterval: 5000,
-    duration: 500,
+    interval: 60000,  // 数据刷新间隔
     apiUrl: '/api/v1/service',
     enableLog: false
   };
   // 合并用户自定义配置
-  const config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
+  let config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
   if (config.enableLog) {
     console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION}`);
     console.log('[TrafficScript] 最终配置如下:', config);
@@ -475,8 +427,6 @@ const domObserver = (() => {
     }
   }
 
-  // 启动内容切换轮播（如时间、百分比）
-  trafficRenderer.startToggleCycle(config.toggleInterval, config.duration);
   // 监听section变化及其子节点变化
   const sectionDetector = domObserver.startSectionDetector(onDomChange);
   // 初始化调用一次
@@ -491,8 +441,6 @@ const domObserver = (() => {
       config = newConfig;
       // 重新启动周期刷新任务
       startPeriodicRefresh();
-      // 重新启动内容切换轮播（传入新配置）
-      trafficRenderer.startToggleCycle(config.toggleInterval, config.duration);
       // 立即刷新数据
       updateTrafficStats();
     } else {
@@ -504,4 +452,4 @@ const domObserver = (() => {
     domObserver.disconnectAll(sectionDetector);
     if (trafficTimer) clearInterval(trafficTimer);
   });
-})();
+})()
