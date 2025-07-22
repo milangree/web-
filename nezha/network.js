@@ -1,8 +1,5 @@
 const SCRIPT_VERSION = 'v20250617';
 
-// == 样式注入模块 - 已移除 ==
-// 不再使用全局CSS注入，改为在渲染时动态隐藏原始元素
-
 // == 工具函数模块 ==
 const utils = (() => {
   /**
@@ -122,6 +119,29 @@ const trafficRenderer = (() => {
   }
 
   /**
+   * 获取插入位置元素
+   * @param {HTMLElement} containerDiv - 容器元素
+   * @param {boolean} isCardView - 是否是卡片视图
+   * @returns {HTMLElement|null} 插入位置元素
+   */
+  function getInsertionPoint(containerDiv, isCardView) {
+    // 尝试查找列表视图下的插入点
+    let insertionPoint = containerDiv.querySelector('section.flex.items-center.w-full.justify-between.gap-1');
+    
+    // 如果没有找到，尝试卡片视图下的插入点
+    if (!insertionPoint) {
+      insertionPoint = containerDiv.querySelector('section.grid.items-center.gap-3');
+    }
+    
+    // 如果都没有找到，使用默认插入点
+    if (!insertionPoint) {
+      insertionPoint = containerDiv.querySelector('.flex.items-center.justify-between');
+    }
+    
+    return insertionPoint;
+  }
+
+  /**
    * 渲染流量统计条目
    * @param {Object} trafficData - 后台返回的流量数据
    * @param {Object} config - 配置项
@@ -151,6 +171,9 @@ const trafficRenderer = (() => {
         }
       }
     }
+
+    // 检测当前视图模式
+    const isCardView = document.querySelector('section.server-card-list') !== null;
 
     serverMap.forEach((serverData, serverName) => {
       // 查找对应显示区域
@@ -205,19 +228,24 @@ const trafficRenderer = (() => {
         }
         log(`更新流量条目: ${serverName}`);
       } else {
-        // 插入新的流量条目元素
-        let oldSection = null;
-        if (config.insertAfter) {
-          oldSection = containerDiv.querySelector('section.flex.items-center.w-full.justify-between.gap-1')
-            || containerDiv.querySelector('section.grid.items-center.gap-3');
-        } else {
-          oldSection = containerDiv.querySelector('section.grid.items-center.gap-3');
-        }
-        if (!oldSection) return;
+        // 获取正确的插入位置
+        const insertionPoint = getInsertionPoint(containerDiv, isCardView);
+        if (!insertionPoint) return;
 
+        // 创建新的流量条目元素
         const newElement = document.createElement('div');
         newElement.classList.add('space-y-1.5', 'new-inserted-element', uniqueClassName);
         newElement.style.width = '100%';
+        
+        // 针对不同视图模式调整样式
+        if (isCardView) {
+          newElement.style.marginTop = '0.5rem';
+          newElement.style.marginBottom = '0.5rem';
+        } else {
+          newElement.style.marginTop = '0.25rem';
+          newElement.style.marginBottom = '0.25rem';
+        }
+        
         newElement.innerHTML = `
           <div class="flex items-center justify-between">
             <div class="flex items-baseline gap-1">
@@ -244,8 +272,8 @@ const trafficRenderer = (() => {
           </div>
         `;
 
-        oldSection.after(newElement);
-        log(`插入新流量条目: ${serverName}`);
+        insertionPoint.after(newElement);
+        log(`插入新流量条目: ${serverName} (${isCardView ? '卡片视图' : '列表视图'})`);
       }
     });
 
@@ -388,11 +416,26 @@ const domObserver = (() => {
     console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION}`);
     console.log('[TrafficScript] 最终配置如下:', config);
   }
+  
+  // 视图模式状态
+  let lastViewMode = null;
+  
   /**
    * 获取并刷新流量统计
    */
   function updateTrafficStats() {
     trafficDataManager.fetchTrafficData(config.apiUrl, config, trafficData => {
+      // 检测当前视图模式
+      const currentViewMode = document.querySelector('section.server-card-list') ? 'card' : 'list';
+      
+      // 如果视图模式发生变化，强制重新渲染
+      const viewModeChanged = lastViewMode !== currentViewMode;
+      lastViewMode = currentViewMode;
+      
+      if (viewModeChanged && config.enableLog) {
+        console.log('[main] 视图模式改变，重新渲染');
+      }
+      
       trafficRenderer.renderTrafficStats(trafficData, config);
     });
   }
