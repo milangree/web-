@@ -1,4 +1,4 @@
-const SCRIPT_VERSION = 'v20250617';
+const SCRIPT_VERSION = 'v20250701';
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -194,11 +194,10 @@ const trafficRenderer = (() => {
         utils.safeSetTextContent(existing, '.from-date', fromFormatted);
         utils.safeSetTextContent(existing, '.to-date', toFormatted);
         
-        // 修复：确保百分比元素被正确更新
+        // 更新百分比元素
         const percentageEl = existing.querySelector('.percentage-value');
         if (percentageEl) {
           percentageEl.textContent = percentage + '%';
-          // 添加明确的字体大小确保可见性
           percentageEl.style.fontSize = '10px';
         }
 
@@ -224,6 +223,13 @@ const trafficRenderer = (() => {
         newElement.style.width = '100%';
         newElement.innerHTML = `
           <div class="flex items-center justify-between">
+            <!-- 时间信息 -->
+            <div class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300 time-info">
+              <span class="from-date">${fromFormatted}</span>
+              <span class="text-neutral-500 dark:text-neutral-400">-</span>
+              <span class="to-date">${toFormatted}</span>
+            </div>
+            <!-- 流量信息 -->
             <div class="flex items-baseline gap-1">
               <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-traffic">${usedFormatted.value}</span>
               <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-unit">${usedFormatted.unit}</span>
@@ -231,18 +237,13 @@ const trafficRenderer = (() => {
               <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-traffic">${totalFormatted.value}</span>
               <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-unit">${totalFormatted.unit}</span>
             </div>
-            <div class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300 time-info" style="opacity:1; transition: opacity 0.3s;">
-              <span class="from-date">${fromFormatted}</span>
-              <span class="text-neutral-500 dark:text-neutral-400">-</span>
-              <span class="to-date">${toFormatted}</span>
-            </div>
           </div>
           <div class="flex items-center gap-1">
             <div class="relative h-1.5 flex-grow">
               <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full"></div>
               <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
             </div>
-            <!-- 修复：添加内联样式确保字体大小 -->
+            <!-- 百分比显示在进度条后面 -->
             <div class="font-medium text-neutral-800 dark:text-neutral-200 percentage-value" style="min-width: 40px; text-align: right; font-size: 10px;">
               ${percentage}%
             </div>
@@ -451,4 +452,4 @@ const domObserver = (() => {
     domObserver.disconnectAll(sectionDetector);
     if (trafficTimer) clearInterval(trafficTimer);
   });
-})();
+})()
