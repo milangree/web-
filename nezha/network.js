@@ -1,8 +1,5 @@
 const SCRIPT_VERSION = 'v20250617';
 
-// == 样式注入模块 - 已移除 ==
-// 不再使用全局CSS注入，改为在渲染时动态隐藏原始元素
-
 // == 工具函数模块 ==
 const utils = (() => {
   /**
@@ -196,7 +193,14 @@ const trafficRenderer = (() => {
         utils.safeSetTextContent(existing, '.total-unit', totalFormatted.unit);
         utils.safeSetTextContent(existing, '.from-date', fromFormatted);
         utils.safeSetTextContent(existing, '.to-date', toFormatted);
-        utils.safeSetTextContent(existing, '.percentage-value', percentage + '%');
+        
+        // 修复：确保百分比元素被正确更新
+        const percentageEl = existing.querySelector('.percentage-value');
+        if (percentageEl) {
+          percentageEl.textContent = percentage + '%';
+          // 添加明确的字体大小确保可见性
+          percentageEl.style.fontSize = '10px';
+        }
 
         const progressBar = existing.querySelector('.progress-bar');
         if (progressBar) {
@@ -236,9 +240,10 @@ const trafficRenderer = (() => {
           <div class="flex items-center gap-1">
             <div class="relative h-1.5 flex-grow">
               <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full"></div>
-              <div class="absolute inset-0 bg-emerald-500 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
+              <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
             </div>
-            <div class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 percentage-value" style="min-width: 40px; text-align: right;">
+            <!-- 修复：添加内联样式确保字体大小 -->
+            <div class="font-medium text-neutral-800 dark:text-neutral-200 percentage-value" style="min-width: 40px; text-align: right; font-size: 10px;">
               ${percentage}%
             </div>
           </div>
@@ -383,7 +388,7 @@ const domObserver = (() => {
     enableLog: false
   };
   // 合并用户自定义配置
-  const config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
+  let config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
   if (config.enableLog) {
     console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION}`);
     console.log('[TrafficScript] 最终配置如下:', config);
