@@ -1,4 +1,4 @@
-const SCRIPT_VERSION = 'v20250722';
+const SCRIPT_VERSION = 'v20250617';
 
 // == 样式注入模块 - 已移除 ==
 // 不再使用全局CSS注入，改为在渲染时动态隐藏原始元素
