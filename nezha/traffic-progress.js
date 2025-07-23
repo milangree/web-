@@ -1,4 +1,4 @@
-const SCRIPT_VERSION = 'v20250724';
+const SCRIPT_VERSION = 'v20250704';
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -120,14 +120,22 @@ const utils = (() => {
 // == 流量统计渲染模块 ==
 const trafficRenderer = (() => {
   /**
-   * 隐藏原始流量显示元素（保留进度条）
+   * 隐藏原始流量显示元素
+   * @param {HTMLElement} container - 服务器容器元素
    */
-  function hideOriginalElements() {
-    document.querySelectorAll('.mt-4.w-full.mx-auto > div').forEach(el => {
-      // 只隐藏非脚本添加的元素
-      if (!el.classList.contains('new-inserted-element')) {
+  function hideOriginalElements(container) {
+    // 多种可能的原始元素选择器
+    const selectors = [
+      '.mt-4.w-full.mx-auto > div:not(.new-inserted-element)',
+      '.flex.items-center.justify-between.gap-1:not(.new-inserted-element)',
+      '.grid.grid-cols-3.gap-1:not(.new-inserted-element)',
+      'section.grid.items-center.gap-3:not(.new-inserted-element)'
+    ];
+    
+    selectors.forEach(selector => {
+      container.querySelectorAll(selector).forEach(el => {
         el.style.display = 'none';
-      }
+      });
     });
   }
 
@@ -162,14 +170,19 @@ const trafficRenderer = (() => {
       }
     }
 
-    serverMap.forEach((serverData, serverName) => {
-      // 查找对应显示区域
-      const targetElement = Array.from(document.querySelectorAll('section.grid.items-center.gap-2'))
-        .find(section => {
-          const firstText = section.querySelector('p')?.textContent.trim();
-          return firstText === serverName.trim();
-        });
-      if (!targetElement) return;
+    // 查找所有可能的服务器容器
+    const serverContainers = document.querySelectorAll('div.border.rounded-xl, div.border.rounded-lg, section.server-card, div[data-server-id]');
+    
+    serverContainers.forEach(container => {
+      // 尝试从容器内获取服务器名称
+      const serverNameElement = container.querySelector('p.font-medium, h3.font-medium, div.font-medium > p, p.text-sm.font-medium');
+      if (!serverNameElement) return;
+      
+      const serverName = serverNameElement.textContent.trim();
+      if (!serverName) return;
+      
+      const serverData = serverMap.get(serverName);
+      if (!serverData) return;
 
       // 格式化数据
       const usedFormatted = utils.formatFileSize(serverData.transfer);
@@ -177,17 +190,14 @@ const trafficRenderer = (() => {
       const percentage = utils.calculatePercentage(serverData.transfer, serverData.max);
       const fromFormatted = utils.formatDate(serverData.from);
       const toFormatted = utils.formatDate(serverData.to);
-      const uniqueClassName = 'traffic-stats-for-server-' + serverData.id;
+      const uniqueClassName = 'traffic-stats-' + serverData.id;
       const progressColor = utils.getHslGradientColor(percentage);
-      const containerDiv = targetElement.closest('div');
-      if (!containerDiv) return;
 
       // 日志输出函数
       const log = (...args) => { if (config.enableLog) console.log('[renderTrafficStats]', ...args); };
 
       // 查找是否已有对应流量条目元素
-      const existing = Array.from(containerDiv.querySelectorAll('.new-inserted-element'))
-        .find(el => el.classList.contains(uniqueClassName));
+      const existing = container.querySelector('.' + uniqueClassName);
 
       if (!config.showTrafficStats) {
         // 不显示时移除对应元素
@@ -213,25 +223,26 @@ const trafficRenderer = (() => {
           percentageEl.textContent = percentage + '%';
         }
 
-        // 修复：确保进度条宽度和颜色正确更新
-        utils.safeSetStyle(existing, '.progress-bar', 'width', `${percentage}%`);
-        utils.safeSetStyle(existing, '.progress-bar', 'backgroundColor', progressColor);
+        // 更新进度条
+        utils.safeSetStyle(existing, '.progress-bar', 'width', percentage + '%');
+        utils.safeSetStyle(existing, '.progress-bar', 'background-color', progressColor);
         
         log(`更新流量条目: ${serverName}`);
       } else {
-        // 插入新的流量条目元素
-        let oldSection = null;
-        if (config.insertAfter) {
-          oldSection = containerDiv.querySelector('section.flex.items-center.w-full.justify-between.gap-1')
-            || containerDiv.querySelector('section.grid.items-center.gap-3');
-        } else {
-          oldSection = containerDiv.querySelector('section.grid.items-center.gap-3');
-        }
-        if (!oldSection) return;
+        // 查找插入位置 - 尝试多种可能的元素
+        let insertPoint = container.querySelector('section.flex.items-center.w-full.justify-between.gap-1') ||
+                         container.querySelector('section.grid.items-center.gap-3') ||
+                         container.querySelector('div.mt-4') ||
+                         container.querySelector('div.pt-4') ||
+                         serverNameElement.closest('section, div');
+        
+        if (!insertPoint) return;
 
+        // 创建新元素
         const newElement = document.createElement('div');
         newElement.classList.add('space-y-1.5', 'new-inserted-element', uniqueClassName);
         newElement.style.width = '100%';
+        newElement.style.marginTop = '0.5rem';
         newElement.innerHTML = `
           <div class="flex items-center justify-between">
             <!-- 时间信息 -->
@@ -249,11 +260,9 @@ const trafficRenderer = (() => {
               <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-unit">${totalFormatted.unit}</span>
             </div>
           </div>
-          <div class="flex items-center gap-1">
+          <div class="flex items-center gap-1 mt-1">
             <div class="relative h-1.5 flex-grow">
-              <!-- 修复：确保背景元素存在 -->
               <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full progress-bg"></div>
-              <!-- 修复：确保进度条元素有正确的类名 -->
               <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
             </div>
             <!-- 百分比显示在进度条后面 -->
@@ -263,13 +272,19 @@ const trafficRenderer = (() => {
           </div>
         `;
 
-        oldSection.after(newElement);
+        // 插入新元素
+        if (insertPoint.nextElementSibling) {
+          insertPoint.parentNode.insertBefore(newElement, insertPoint.nextElementSibling);
+        } else {
+          insertPoint.parentNode.appendChild(newElement);
+        }
+        
         log(`插入新流量条目: ${serverName}`);
       }
+      
+      // 隐藏原始元素
+      hideOriginalElements(container);
     });
-
-    // 确保所有相关元素都被处理
-    hideOriginalElements();
   }
 
   return {
@@ -324,7 +339,7 @@ const trafficDataManager = (() => {
 
 // == DOM变化监听模块 ==
 const domObserver = (() => {
-  const TARGET_SELECTOR = 'section.server-card-list, section.server-inline-list';
+  const TARGET_SELECTOR = 'section.server-card-list, section.server-inline-list, div.grid.grid-cols-1.gap-4, div.flex.flex-col.gap-4';
   let currentSection = null;
   let childObserver = null;
 
@@ -354,7 +369,7 @@ const domObserver = (() => {
         }
       }
     });
-    childObserver.observe(currentSection, { childList: true, subtree: false });
+    childObserver.observe(currentSection, { childList: true, subtree: true });
     // 初始调用一次
     onChangeCallback();
   }
@@ -399,20 +414,34 @@ const domObserver = (() => {
     insertAfter: true,
     interval: 60000,  // 数据刷新间隔
     apiUrl: '/api/v1/service',
-    enableLog: false
+    enableLog: false,
+    fallbackToGlobal: true  // 添加回退机制
   };
+  
   // 合并用户自定义配置
   let config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
+  
   if (config.enableLog) {
     console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION}`);
     console.log('[TrafficScript] 最终配置如下:', config);
   }
+  
   /**
    * 获取并刷新流量统计
    */
   function updateTrafficStats() {
     trafficDataManager.fetchTrafficData(config.apiUrl, config, trafficData => {
-      trafficRenderer.renderTrafficStats(trafficData, config);
+      try {
+        trafficRenderer.renderTrafficStats(trafficData, config);
+      } catch (e) {
+        if (config.enableLog) console.error('渲染流量统计失败:', e);
+        if (config.fallbackToGlobal) {
+          // 回退到全局处理：显示所有脚本创建的元素
+          document.querySelectorAll('.new-inserted-element').forEach(el => {
+            el.style.display = 'block';
+          });
+        }
+      }
     });
   }
 
@@ -465,4 +494,14 @@ const domObserver = (() => {
     domObserver.disconnectAll(sectionDetector);
     if (trafficTimer) clearInterval(trafficTimer);
   });
+  
+  // 导出API用于调试
+  window.TrafficScript = {
+    refresh: updateTrafficStats,
+    getConfig: () => config,
+    setConfig: (newConfig) => {
+      config = Object.assign({}, config, newConfig);
+      updateTrafficStats();
+    }
+  };
 })();
