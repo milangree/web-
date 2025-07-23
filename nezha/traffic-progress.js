@@ -1,4 +1,4 @@
-const SCRIPT_VERSION = 'v20250704';
+const SCRIPT_VERSION = 'v20250705';
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -107,36 +107,92 @@ const utils = (() => {
     return `hsl(${h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%)`;
   }
 
+  // 查找父元素直到找到匹配的选择器
+  function findParent(el, selector) {
+    while (el && !el.matches(selector)) {
+      el = el.parentElement;
+    }
+    return el;
+  }
+
   return {
     formatFileSize,
     calculatePercentage,
     formatDate,
     safeSetTextContent,
     safeSetStyle,
-    getHslGradientColor
+    getHslGradientColor,
+    findParent
   };
 })();
 
 // == 流量统计渲染模块 ==
 const trafficRenderer = (() => {
+  // 存储服务器名称与ID的映射
+  const serverNameToIdMap = new Map();
+  
   /**
-   * 隐藏原始流量显示元素
-   * @param {HTMLElement} container - 服务器容器元素
+   * 获取服务器卡片容器
    */
-  function hideOriginalElements(container) {
-    // 多种可能的原始元素选择器
+  function getServerCardContainers() {
+    // 尝试多种可能的容器选择器
     const selectors = [
-      '.mt-4.w-full.mx-auto > div:not(.new-inserted-element)',
-      '.flex.items-center.justify-between.gap-1:not(.new-inserted-element)',
-      '.grid.grid-cols-3.gap-1:not(.new-inserted-element)',
-      'section.grid.items-center.gap-3:not(.new-inserted-element)'
+      'div.border.rounded-xl',
+      'div.border.rounded-lg',
+      'section.server-card',
+      'div[data-server-id]',
+      'div.bg-white.dark\\:bg-gray-800.rounded-lg.shadow'
     ];
     
-    selectors.forEach(selector => {
-      container.querySelectorAll(selector).forEach(el => {
-        el.style.display = 'none';
-      });
+    for (const selector of selectors) {
+      const containers = document.querySelectorAll(selector);
+      if (containers.length > 0) {
+        return containers;
+      }
+    }
+    
+    // 如果以上都没找到，尝试查找包含服务器名称的元素
+    const nameElements = document.querySelectorAll('p.font-medium, h3.font-medium');
+    const containers = new Set();
+    
+    nameElements.forEach(el => {
+      const container = utils.findParent(el, 'div, section');
+      if (container) containers.add(container);
     });
+    
+    return Array.from(containers);
+  }
+
+  /**
+   * 获取服务器名称
+   * @param {HTMLElement} container - 服务器容器
+   */
+  function getServerName(container) {
+    // 尝试多种可能的服务器名称元素
+    const nameSelectors = [
+      'p.font-medium',
+      'h3.font-medium',
+      'div.font-medium > p',
+      'p.text-sm.font-medium',
+      'div > p:first-child'
+    ];
+    
+    for (const selector of nameSelectors) {
+      const nameEl = container.querySelector(selector);
+      if (nameEl && nameEl.textContent.trim()) {
+        return nameEl.textContent.trim();
+      }
+    }
+    
+    // 如果以上都没找到，尝试直接查找包含文本的元素
+    const textElements = container.querySelectorAll('p, h3, div');
+    for (const el of textElements) {
+      if (el.textContent.trim() && el.textContent.trim().length < 50) {
+        return el.textContent.trim();
+      }
+    }
+    
+    return null;
   }
 
   /**
@@ -145,20 +201,22 @@ const trafficRenderer = (() => {
    * @param {Object} config - 配置项
    */
   function renderTrafficStats(trafficData, config) {
-    const serverMap = new Map();
-
-    // 解析流量数据，按服务器名聚合
+    // 1. 构建服务器数据映射
+    const serverDataMap = new Map();
+    
     for (const cycleId in trafficData) {
       const cycle = trafficData[cycleId];
       if (!cycle.server_name || !cycle.transfer) continue;
+      
       for (const serverId in cycle.server_name) {
         const serverName = cycle.server_name[serverId];
         const transfer = cycle.transfer[serverId];
         const max = cycle.max;
         const from = cycle.from;
         const to = cycle.to;
+        
         if (serverName && transfer !== undefined && max && from && to) {
-          serverMap.set(serverName, {
+          serverDataMap.set(serverName, {
             id: serverId,
             transfer,
             max,
@@ -166,129 +224,119 @@ const trafficRenderer = (() => {
             from,
             to
           });
+          // 存储名称到ID的映射
+          serverNameToIdMap.set(serverName, serverId);
         }
       }
     }
-
-    // 查找所有可能的服务器容器
-    const serverContainers = document.querySelectorAll('div.border.rounded-xl, div.border.rounded-lg, section.server-card, div[data-server-id]');
     
-    serverContainers.forEach(container => {
-      // 尝试从容器内获取服务器名称
-      const serverNameElement = container.querySelector('p.font-medium, h3.font-medium, div.font-medium > p, p.text-sm.font-medium');
-      if (!serverNameElement) return;
+    // 2. 获取所有服务器卡片容器
+    const containers = getServerCardContainers();
+    if (config.enableLog) console.log(`找到 ${containers.length} 个服务器容器`);
+    
+    // 3. 处理每个容器
+    containers.forEach(container => {
+      const serverName = getServerName(container);
+      if (!serverName) {
+        if (config.enableLog) console.log('无法确定服务器名称', container);
+        return;
+      }
       
-      const serverName = serverNameElement.textContent.trim();
-      if (!serverName) return;
+      const serverData = serverDataMap.get(serverName);
+      if (!serverData) {
+        if (config.enableLog) console.log(`未找到 "${serverName}" 的流量数据`);
+        return;
+      }
       
-      const serverData = serverMap.get(serverName);
-      if (!serverData) return;
-
-      // 格式化数据
+      // 4. 准备数据
       const usedFormatted = utils.formatFileSize(serverData.transfer);
       const totalFormatted = utils.formatFileSize(serverData.max);
       const percentage = utils.calculatePercentage(serverData.transfer, serverData.max);
       const fromFormatted = utils.formatDate(serverData.from);
       const toFormatted = utils.formatDate(serverData.to);
-      const uniqueClassName = 'traffic-stats-' + serverData.id;
+      const uniqueClassName = `traffic-stats-${serverData.id}`;
       const progressColor = utils.getHslGradientColor(percentage);
-
-      // 日志输出函数
-      const log = (...args) => { if (config.enableLog) console.log('[renderTrafficStats]', ...args); };
-
-      // 查找是否已有对应流量条目元素
-      const existing = container.querySelector('.' + uniqueClassName);
-
-      if (!config.showTrafficStats) {
-        // 不显示时移除对应元素
-        if (existing) {
-          existing.remove();
-          log(`移除流量条目: ${serverName}`);
-        }
-        return;
-      }
-
-      if (existing) {
-        // 更新已存在元素内容
-        utils.safeSetTextContent(existing, '.used-traffic', usedFormatted.value);
-        utils.safeSetTextContent(existing, '.used-unit', usedFormatted.unit);
-        utils.safeSetTextContent(existing, '.total-traffic', totalFormatted.value);
-        utils.safeSetTextContent(existing, '.total-unit', totalFormatted.unit);
-        utils.safeSetTextContent(existing, '.from-date', fromFormatted);
-        utils.safeSetTextContent(existing, '.to-date', toFormatted);
-        
-        // 更新百分比元素
-        const percentageEl = existing.querySelector('.percentage-value');
-        if (percentageEl) {
-          percentageEl.textContent = percentage + '%';
-        }
-
-        // 更新进度条
-        utils.safeSetStyle(existing, '.progress-bar', 'width', percentage + '%');
-        utils.safeSetStyle(existing, '.progress-bar', 'background-color', progressColor);
-        
-        log(`更新流量条目: ${serverName}`);
-      } else {
-        // 查找插入位置 - 尝试多种可能的元素
-        let insertPoint = container.querySelector('section.flex.items-center.w-full.justify-between.gap-1') ||
-                         container.querySelector('section.grid.items-center.gap-3') ||
-                         container.querySelector('div.mt-4') ||
-                         container.querySelector('div.pt-4') ||
-                         serverNameElement.closest('section, div');
-        
-        if (!insertPoint) return;
-
-        // 创建新元素
-        const newElement = document.createElement('div');
-        newElement.classList.add('space-y-1.5', 'new-inserted-element', uniqueClassName);
-        newElement.style.width = '100%';
-        newElement.style.marginTop = '0.5rem';
-        newElement.innerHTML = `
-          <div class="flex items-center justify-between">
-            <!-- 时间信息 -->
-            <div class="text-[10px] font-medium text-neutral-600 dark:text-neutral-300 time-info">
-              <span class="from-date">${fromFormatted}</span>
-              <span class="text-neutral-500 dark:text-neutral-400">-</span>
-              <span class="to-date">${toFormatted}</span>
+      
+      // 5. 查找或创建流量显示元素
+      let trafficElement = container.querySelector(`.${uniqueClassName}`);
+      
+      if (!trafficElement) {
+        trafficElement = document.createElement('div');
+        trafficElement.className = `traffic-stats ${uniqueClassName} w-full mt-2`;
+        trafficElement.innerHTML = `
+          <div class="traffic-info flex flex-col gap-1">
+            <div class="flex justify-between items-center">
+              <div class="time-range text-xs text-gray-500 dark:text-gray-400">
+                <span class="from-date">${fromFormatted}</span> - 
+                <span class="to-date">${toFormatted}</span>
+              </div>
+              <div class="usage text-xs font-medium">
+                <span class="used-traffic">${usedFormatted.value}</span>
+                <span class="used-unit">${usedFormatted.unit}</span> / 
+                <span class="total-traffic">${totalFormatted.value}</span>
+                <span class="total-unit">${totalFormatted.unit}</span>
+              </div>
             </div>
-            <!-- 流量信息 -->
-            <div class="flex items-baseline gap-1">
-              <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-traffic">${usedFormatted.value}</span>
-              <span class="text-[10px] font-medium text-neutral-800 dark:text-neutral-200 used-unit">${usedFormatted.unit}</span>
-              <span class="text-[10px] text-neutral-500 dark:text-neutral-400">/ </span>
-              <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-traffic">${totalFormatted.value}</span>
-              <span class="text-[10px] text-neutral-500 dark:text-neutral-400 total-unit">${totalFormatted.unit}</span>
-            </div>
-          </div>
-          <div class="flex items-center gap-1 mt-1">
-            <div class="relative h-1.5 flex-grow">
-              <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full progress-bg"></div>
-              <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
-            </div>
-            <!-- 百分比显示在进度条后面 -->
-            <div class="font-medium text-neutral-800 dark:text-neutral-200 percentage-value" style="min-width: 40px; text-align: right; font-size: 10px;">
-              ${percentage}%
+            <div class="progress-container flex items-center gap-2">
+              <div class="progress-bar-bg bg-gray-200 dark:bg-gray-700 rounded-full h-2 flex-grow overflow-hidden">
+                <div class="progress-bar h-full rounded-full transition-all duration-300" 
+                     style="width: ${percentage}%; background-color: ${progressColor};"></div>
+              </div>
+              <div class="percentage text-xs font-medium min-w-[40px] text-right">
+                <span class="percentage-value">${percentage}</span>%
+              </div>
             </div>
           </div>
         `;
-
-        // 插入新元素
-        if (insertPoint.nextElementSibling) {
-          insertPoint.parentNode.insertBefore(newElement, insertPoint.nextElementSibling);
-        } else {
-          insertPoint.parentNode.appendChild(newElement);
+        
+        // 添加到容器中（尝试多种可能的位置）
+        const possibleInsertPoints = [
+          container.querySelector('.server-actions'),
+          container.querySelector('.server-status'),
+          container.querySelector('.server-info'),
+          container.querySelector('.server-name').nextElementSibling,
+          container.querySelector('.server-name').parentElement
+        ];
+        
+        let inserted = false;
+        for (const point of possibleInsertPoints) {
+          if (point && point.parentNode) {
+            point.parentNode.insertBefore(trafficElement, point.nextSibling);
+            inserted = true;
+            break;
+          }
         }
         
-        log(`插入新流量条目: ${serverName}`);
+        // 如果以上位置都不行，添加到容器末尾
+        if (!inserted) {
+          container.appendChild(trafficElement);
+        }
+        
+        if (config.enableLog) console.log(`为服务器 "${serverName}" 添加流量显示`);
+      } else {
+        // 更新现有元素
+        utils.safeSetTextContent(trafficElement, '.from-date', fromFormatted);
+        utils.safeSetTextContent(trafficElement, '.to-date', toFormatted);
+        utils.safeSetTextContent(trafficElement, '.used-traffic', usedFormatted.value);
+        utils.safeSetTextContent(trafficElement, '.used-unit', usedFormatted.unit);
+        utils.safeSetTextContent(trafficElement, '.total-traffic', totalFormatted.value);
+        utils.safeSetTextContent(trafficElement, '.total-unit', totalFormatted.unit);
+        utils.safeSetTextContent(trafficElement, '.percentage-value', percentage);
+        
+        const progressBar = trafficElement.querySelector('.progress-bar');
+        if (progressBar) {
+          progressBar.style.width = `${percentage}%`;
+          progressBar.style.backgroundColor = progressColor;
+        }
+        
+        if (config.enableLog) console.log(`更新服务器 "${serverName}" 的流量显示`);
       }
-      
-      // 隐藏原始元素
-      hideOriginalElements(container);
     });
   }
 
   return {
-    renderTrafficStats
+    renderTrafficStats,
+    serverNameToIdMap
   };
 })();
 
@@ -337,163 +385,111 @@ const trafficDataManager = (() => {
   };
 })();
 
-// == DOM变化监听模块 ==
-const domObserver = (() => {
-  const TARGET_SELECTOR = 'section.server-card-list, section.server-inline-list, div.grid.grid-cols-1.gap-4, div.flex.flex-col.gap-4';
-  let currentSection = null;
-  let childObserver = null;
-
-  /**
-   * DOM 子节点变更回调，调用传入的函数
-   * @param {Function} onChangeCallback - 变更处理函数
-   */
-  function onDomChildListChange(onChangeCallback) {
-    onChangeCallback();
-  }
-
-  /**
-   * 监听指定section子节点变化
-   * @param {HTMLElement} section - 目标section元素
-   * @param {Function} onChangeCallback - 变更处理函数
-   */
-  function observeSection(section, onChangeCallback) {
-    if (childObserver) {
-      childObserver.disconnect();
-    }
-    currentSection = section;
-    childObserver = new MutationObserver(mutations => {
-      for (const m of mutations) {
-        if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)) {
-          onDomChildListChange(onChangeCallback);
-          break;
-        }
-      }
-    });
-    childObserver.observe(currentSection, { childList: true, subtree: true });
-    // 初始调用一次
-    onChangeCallback();
-  }
-
-  /**
-   * 启动顶层section监听，检测section切换
-   * @param {Function} onChangeCallback - section变化时回调
-   * @returns {MutationObserver} sectionDetector实例
-   */
-  function startSectionDetector(onChangeCallback) {
-    const sectionDetector = new MutationObserver(() => {
-      const section = document.querySelector(TARGET_SELECTOR);
-      if (section && section !== currentSection) {
-        observeSection(section, onChangeCallback);
-      }
-    });
-    const root = document.querySelector('main') || document.body;
-    sectionDetector.observe(root, { childList: true, subtree: true });
-    return sectionDetector;
-  }
-
-  /**
-   * 断开所有监听
-   * @param {MutationObserver} sectionDetector - 顶层section监听实例
-   */
-  function disconnectAll(sectionDetector) {
-    if (childObserver) childObserver.disconnect();
-    if (sectionDetector) sectionDetector.disconnect();
-  }
-
-  return {
-    startSectionDetector,
-    disconnectAll
-  };
-})();
-
 // == 主程序入口 ==
 (function main() {
   // 默认配置
   const defaultConfig = {
     showTrafficStats: true,
-    insertAfter: true,
     interval: 60000,  // 数据刷新间隔
     apiUrl: '/api/v1/service',
-    enableLog: false,
-    fallbackToGlobal: true  // 添加回退机制
+    enableLog: true,  // 默认开启日志以便调试
+    debugMode: false  // 额外的调试信息
   };
   
   // 合并用户自定义配置
   let config = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
   
+  // 初始化日志
   if (config.enableLog) {
-    console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION}`);
-    console.log('[TrafficScript] 最终配置如下:', config);
+    console.log(`[TrafficScript] 版本: ${SCRIPT_VERSION} 已加载`);
+    console.log('[TrafficScript] 配置:', config);
   }
+  
+  // 创建样式元素
+  const styleElement = document.createElement('style');
+  styleElement.textContent = `
+    .traffic-stats {
+      padding: 0.5rem 0;
+      border-top: 1px solid #e5e7eb;
+      border-bottom: 1px solid #e5e7eb;
+      margin: 0.5rem 0;
+    }
+    .dark .traffic-stats {
+      border-color: #374151;
+    }
+    .progress-bar-bg {
+      min-width: 100px;
+    }
+  `;
+  document.head.appendChild(styleElement);
   
   /**
    * 获取并刷新流量统计
    */
   function updateTrafficStats() {
+    if (config.enableLog) console.log('[updateTrafficStats] 开始更新流量统计');
+    
     trafficDataManager.fetchTrafficData(config.apiUrl, config, trafficData => {
       try {
         trafficRenderer.renderTrafficStats(trafficData, config);
-      } catch (e) {
-        if (config.enableLog) console.error('渲染流量统计失败:', e);
-        if (config.fallbackToGlobal) {
-          // 回退到全局处理：显示所有脚本创建的元素
-          document.querySelectorAll('.new-inserted-element').forEach(el => {
-            el.style.display = 'block';
+        
+        if (config.debugMode) {
+          console.log('流量数据:', trafficData);
+          console.log('服务器映射:', trafficRenderer.serverNameToIdMap);
+          
+          // 显示所有服务器容器
+          const containers = trafficRenderer.getServerCardContainers();
+          console.log('找到的服务器容器:', containers);
+          
+          containers.forEach(container => {
+            const name = trafficRenderer.getServerName(container);
+            console.log(`容器: ${name || '未知'}`, container);
           });
         }
+      } catch (error) {
+        console.error('[TrafficScript] 渲染流量统计时出错:', error);
       }
     });
   }
-
+  
   /**
-   * DOM变更处理函数，触发刷新
+   * 初始化执行
    */
-  function onDomChange() {
-    if (config.enableLog) console.log('[main] DOM变化，刷新流量数据');
+  function init() {
+    // 初始执行
     updateTrafficStats();
-    if (!trafficTimer) startPeriodicRefresh();
+    
+    // 设置定时刷新
+    setInterval(updateTrafficStats, config.interval);
+    
+    // 监听DOM变化
+    const observer = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          // 延迟执行以避免与页面脚本冲突
+          setTimeout(updateTrafficStats, 500);
+          break;
+        }
+      }
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    // 页面卸载时清理
+    window.addEventListener('beforeunload', () => {
+      observer.disconnect();
+    });
   }
-
-  // 定时器句柄，防止重复启动
-  let trafficTimer = null;
-
-  /**
-   * 启动周期刷新任务
-   */
-  function startPeriodicRefresh() {
-    if (!trafficTimer) {
-      if (config.enableLog) console.log('[main] 启动周期刷新任务');
-      trafficTimer = setInterval(() => {
-        updateTrafficStats();
-      }, config.interval);
-    }
+  
+  // 延迟初始化以确保DOM加载完成
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    setTimeout(init, 1000);
   }
-
-  // 监听section变化及其子节点变化
-  const sectionDetector = domObserver.startSectionDetector(onDomChange);
-  // 初始化调用一次
-  onDomChange();
-
-  // 延迟 100ms 后尝试读取用户配置并覆盖
-  setTimeout(() => {
-    const newConfig = Object.assign({}, defaultConfig, window.TrafficScriptConfig || {});
-    // 判断配置是否变化（简单粗暴比较JSON字符串）
-    if (JSON.stringify(newConfig) !== JSON.stringify(config)) {
-      if (config.enableLog) console.log('[main] 100ms后检测到新配置，更新配置并重启任务');
-      config = newConfig;
-      // 重新启动周期刷新任务
-      startPeriodicRefresh();
-      // 立即刷新数据
-      updateTrafficStats();
-    } else {
-      if (config.enableLog) console.log('[main] 100ms后无新配置，保持原配置');
-    }
-  }, 100);
-  // 页面卸载时清理监听和定时器
-  window.addEventListener('beforeunload', () => {
-    domObserver.disconnectAll(sectionDetector);
-    if (trafficTimer) clearInterval(trafficTimer);
-  });
   
   // 导出API用于调试
   window.TrafficScript = {
@@ -502,6 +498,7 @@ const domObserver = (() => {
     setConfig: (newConfig) => {
       config = Object.assign({}, config, newConfig);
       updateTrafficStats();
-    }
+    },
+    getServerMap: () => trafficRenderer.serverNameToIdMap
   };
 })();
