@@ -1,4 +1,4 @@
-const SCRIPT_VERSION = 'v20250701';
+const SCRIPT_VERSION = 'v20250724';
 
 // == 工具函数模块 ==
 const utils = (() => {
@@ -66,6 +66,18 @@ const utils = (() => {
   }
 
   /**
+   * 安全设置元素样式，避免空引用错误
+   * @param {HTMLElement} parent - 父元素
+   * @param {string} selector - 子元素选择器
+   * @param {string} property - CSS属性名
+   * @param {string} value - CSS属性值
+   */
+  function safeSetStyle(parent, selector, property, value) {
+    const el = parent.querySelector(selector);
+    if (el) el.style[property] = value;
+  }
+
+  /**
    * 根据百分比返回渐变HSL颜色（绿→橙→红）
    * @param {number} percentage - 0~100的百分比
    * @returns {string} hsl颜色字符串
@@ -100,6 +112,7 @@ const utils = (() => {
     calculatePercentage,
     formatDate,
     safeSetTextContent,
+    safeSetStyle,
     getHslGradientColor
   };
 })();
@@ -198,14 +211,12 @@ const trafficRenderer = (() => {
         const percentageEl = existing.querySelector('.percentage-value');
         if (percentageEl) {
           percentageEl.textContent = percentage + '%';
-          percentageEl.style.fontSize = '10px';
         }
 
-        const progressBar = existing.querySelector('.progress-bar');
-        if (progressBar) {
-          progressBar.style.width = percentage + '%';
-          progressBar.style.backgroundColor = progressColor;
-        }
+        // 修复：确保进度条宽度和颜色正确更新
+        utils.safeSetStyle(existing, '.progress-bar', 'width', `${percentage}%`);
+        utils.safeSetStyle(existing, '.progress-bar', 'backgroundColor', progressColor);
+        
         log(`更新流量条目: ${serverName}`);
       } else {
         // 插入新的流量条目元素
@@ -240,7 +251,9 @@ const trafficRenderer = (() => {
           </div>
           <div class="flex items-center gap-1">
             <div class="relative h-1.5 flex-grow">
-              <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full"></div>
+              <!-- 修复：确保背景元素存在 -->
+              <div class="absolute inset-0 bg-neutral-100 dark:bg-neutral-800 rounded-full progress-bg"></div>
+              <!-- 修复：确保进度条元素有正确的类名 -->
               <div class="absolute inset-0 rounded-full transition-all duration-300 progress-bar" style="width: ${percentage}%; max-width: 100%; background-color: ${progressColor};"></div>
             </div>
             <!-- 百分比显示在进度条后面 -->
@@ -452,4 +465,4 @@ const domObserver = (() => {
     domObserver.disconnectAll(sectionDetector);
     if (trafficTimer) clearInterval(trafficTimer);
   });
-})()
+})();
